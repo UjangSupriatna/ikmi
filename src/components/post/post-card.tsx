@@ -83,9 +83,19 @@ function getImageUrl(imagePath: string | null | undefined): string | null {
     return imagePath
   }
   
-  // If it's a relative path starting with /, return as is (will be served from public)
-  if (imagePath.startsWith('/')) {
+  // If it's already using API serve, return as is
+  if (imagePath.startsWith('/api/serve/')) {
     return imagePath
+  }
+  
+  // If it's an old path like /uploads/posts/file.jpg or uploads/posts/file.jpg
+  // Convert to API serve path for standalone mode compatibility
+  const cleanPath = imagePath.startsWith('/') ? imagePath.slice(1) : imagePath
+  
+  // Check if it's an uploads path
+  if (cleanPath.startsWith('uploads/')) {
+    // Convert: uploads/posts/file.jpg -> /api/serve/posts/file.jpg
+    return `/api/serve/${cleanPath.replace('uploads/', '')}`
   }
   
   // Otherwise, assume it's a relative path and prepend /

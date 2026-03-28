@@ -11,8 +11,8 @@ import {
   Plus,
   Users,
   XCircle,
-  Upload,
-  CheckCircle2
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react'
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -39,6 +39,7 @@ const EMOJI_CATEGORIES = {
 }
 
 interface ImageWithStatus {
+  id: string // unique ID
   localUrl: string // For preview (blob URL)
   serverPath: string | null // Server path after upload
   file: File
@@ -78,23 +79,29 @@ export function CreatePost({
   const { toast } = useToast()
 
   // Upload a single image to server
-  const uploadImageToServer = async (imageIndex: number, file: File): Promise<string | null> => {
+  const uploadImageToServer = async (file: File): Promise<string | null> => {
     try {
       const formData = new FormData()
       formData.append('file', file)
       formData.append('type', 'posts')
+
+      console.log('Starting upload for:', file.name, 'size:', file.size)
 
       const response = await fetch('/api/upload', {
         method: 'POST',
         body: formData,
       })
 
+      console.log('Upload response status:', response.status)
+
       if (!response.ok) {
         const error = await response.json()
+        console.error('Upload error:', error)
         throw new Error(error.error || 'Upload failed')
       }
 
       const data = await response.json()
+      console.log('Upload success, path:', data.path)
       return data.path
     } catch (error) {
       console.error('Error uploading image:', error)
@@ -104,7 +111,7 @@ export function CreatePost({
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
-    if (!files) return
+    if (!files || files.length === 0) return
 
     if (images.length + files.length > 4) {
       toast({
@@ -117,22 +124,25 @@ export function CreatePost({
 
     const newImages: ImageWithStatus[] = []
 
+    // Process each file
     for (const file of Array.from(files)) {
       if (images.length + newImages.length >= 4) break
       
-      if (file.size > 10 * 1024 * 1024) {
+      if (file.size > 5 * 1024 * 1024) {
         toast({
           title: 'Gambar terlalu besar',
-          description: 'Ukuran gambar maksimal 10MB',
+          description: 'Ukuran gambar maksimal 5MB',
           variant: 'destructive',
         })
         continue
       }
 
-      // Create local preview URL
+      // Create local preview URL immediately
       const localUrl = URL.createObjectURL(file)
+      const id = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
       
       newImages.push({
+        id,
         localUrl,
         serverPath: null,
         file,
@@ -142,69 +152,44 @@ export function CreatePost({
       })
     }
 
-    // Add images to state first
+    // Add images to state immediately for preview
     setImages((prev) => [...prev, ...newImages])
 
-    // Upload each image to server
+    // Upload each image to server sequentially
     for (let i = 0; i < newImages.length; i++) {
-      const imageIndex = images.length + i
+      const imageId = newImages[i].id
       const file = newImages[i].file
 
-      // Simulate progress updates
-      const progressInterval = setInterval(() => {
-        setImages((prev) => {
-          const updated = [...prev]
-          if (updated[imageIndex]) {
-            updated[imageIndex] = {
-              ...updated[imageIndex],
-              uploadProgress: Math.min(updated[imageIndex].uploadProgress + 20, 90),
-            }
-          }
-          return updated
-        })
-      }, 100)
+      // Update progress
+      setImages((prev) => prev.map(img => 
+        img.id === imageId ? { ...img, uploadProgress: 20 } : img
+      ))
 
       try {
-        const serverPath = await uploadImageToServer(imageIndex, file)
+        const serverPath = await uploadImageToServer(file)
         
-        clearInterval(progressInterval)
-
-        setImages((prev) => {
-          const updated = [...prev]
-          if (updated[imageIndex]) {
-            if (serverPath) {
-              updated[imageIndex] = {
-                ...updated[imageIndex],
-                serverPath,
-                isUploading: false,
-                uploadProgress: 100,
-                uploadError: null,
-              }
-            } else {
-              updated[imageIndex] = {
-                ...updated[imageIndex],
-                isUploading: false,
-                uploadProgress: 0,
-                uploadError: 'Gagal mengupload gambar',
-              }
-            }
-          }
-          return updated
-        })
+        if (serverPath) {
+          // Success - update with server path
+          setImages((prev) => prev.map(img => 
+            img.id === imageId 
+              ? { ...img, serverPath, isUploading: false, uploadProgress: 100, uploadError: null }
+              : img
+          ))
+        } else {
+          // Failed - show error
+          setImages((prev) => prev.map(img => 
+            img.id === imageId 
+              ? { ...img, isUploading: false, uploadProgress: 0, uploadError: 'Gagal upload' }
+              : img
+          ))
+        }
       } catch (error) {
-        clearInterval(progressInterval)
-        setImages((prev) => {
-          const updated = [...prev]
-          if (updated[imageIndex]) {
-            updated[imageIndex] = {
-              ...updated[imageIndex],
-              isUploading: false,
-              uploadProgress: 0,
-              uploadError: 'Gagal mengupload gambar',
-            }
-          }
-          return updated
-        })
+        console.error('Upload error:', error)
+        setImages((prev) => prev.map(img => 
+          img.id === imageId 
+            ? { ...img, isUploading: false, uploadProgress: 0, uploadError: 'Gagal upload' }
+            : img
+        ))
       }
     }
 
@@ -212,84 +197,49 @@ export function CreatePost({
     e.target.value = ''
   }
 
-  const removeImage = (index: number) => {
+  const removeImage = (id: string) => {
     setImages((prev) => {
-      // Revoke blob URL to prevent memory leak
-      URL.revokeObjectURL(prev[index].localUrl)
-      return prev.filter((_, i) => i !== index)
+      const img = prev.find(i => i.id === id)
+      if (img) {
+        URL.revokeObjectURL(img.localUrl)
+      }
+      return prev.filter((i) => i.id !== id)
     })
   }
 
-  const retryUpload = async (index: number) => {
-    const image = images[index]
+  const retryUpload = async (id: string) => {
+    const image = images.find(img => img.id === id)
     if (!image) return
 
     // Reset state for retry
-    setImages((prev) => {
-      const updated = [...prev]
-      updated[index] = {
-        ...updated[index],
-        isUploading: true,
-        uploadProgress: 0,
-        uploadError: null,
-      }
-      return updated
-    })
-
-    // Simulate progress
-    const progressInterval = setInterval(() => {
-      setImages((prev) => {
-        const updated = [...prev]
-        if (updated[index]) {
-          updated[index] = {
-            ...updated[index],
-            uploadProgress: Math.min(updated[index].uploadProgress + 20, 90),
-          }
-        }
-        return updated
-      })
-    }, 100)
+    setImages((prev) => prev.map(img => 
+      img.id === id 
+        ? { ...img, isUploading: true, uploadProgress: 0, uploadError: null }
+        : img
+    ))
 
     try {
-      const serverPath = await uploadImageToServer(index, image.file)
-      clearInterval(progressInterval)
-
-      setImages((prev) => {
-        const updated = [...prev]
-        if (updated[index]) {
-          if (serverPath) {
-            updated[index] = {
-              ...updated[index],
-              serverPath,
-              isUploading: false,
-              uploadProgress: 100,
-              uploadError: null,
-            }
-          } else {
-            updated[index] = {
-              ...updated[index],
-              isUploading: false,
-              uploadProgress: 0,
-              uploadError: 'Gagal mengupload gambar',
-            }
-          }
-        }
-        return updated
-      })
+      const serverPath = await uploadImageToServer(image.file)
+      
+      if (serverPath) {
+        setImages((prev) => prev.map(img => 
+          img.id === id 
+            ? { ...img, serverPath, isUploading: false, uploadProgress: 100, uploadError: null }
+            : img
+        ))
+      } else {
+        setImages((prev) => prev.map(img => 
+          img.id === id 
+            ? { ...img, isUploading: false, uploadProgress: 0, uploadError: 'Gagal upload' }
+            : img
+        ))
+      }
     } catch (error) {
-      clearInterval(progressInterval)
-      setImages((prev) => {
-        const updated = [...prev]
-        if (updated[index]) {
-          updated[index] = {
-            ...updated[index],
-            isUploading: false,
-            uploadProgress: 0,
-            uploadError: 'Gagal mengupload gambar',
-          }
-        }
-        return updated
-      })
+      setImages((prev) => prev.map(img => 
+        img.id === id 
+          ? { ...img, isUploading: false, uploadProgress: 0, uploadError: 'Gagal upload' }
+          : img
+      ))
     }
   }
 
@@ -402,9 +352,10 @@ export function CreatePost({
       .slice(0, 2)
   }
 
-  const allImagesUploaded = images.length > 0 && images.every(img => img.serverPath && !img.isUploading)
-  const hasUploadingImages = images.some(img => img.isUploading)
-  const hasFailedImages = images.some(img => img.uploadError && !img.isUploading)
+  const uploadingCount = images.filter(img => img.isUploading).length
+  const uploadedCount = images.filter(img => img.serverPath && !img.isUploading).length
+  const failedCount = images.filter(img => img.uploadError && !img.isUploading).length
+  const canPost = images.length > 0 ? images.every(img => img.serverPath && !img.isUploading) : content.trim().length > 0
 
   return (
     <motion.div
@@ -504,47 +455,52 @@ export function CreatePost({
                     className="mt-3"
                   >
                     <div className="grid grid-cols-2 gap-2">
-                      {images.map((image, index) => (
+                      {images.map((image) => (
                         <motion.div
-                          key={index}
+                          key={image.id}
                           initial={{ opacity: 0, scale: 0.8 }}
                           animate={{ opacity: 1, scale: 1 }}
                           exit={{ opacity: 0, scale: 0.8 }}
                           className="relative aspect-square rounded-lg overflow-hidden bg-muted group"
                         >
+                          {/* Always show preview from local URL */}
                           <img
                             src={image.localUrl}
-                            alt={`Upload ${index + 1}`}
+                            alt="Preview"
                             className="w-full h-full object-cover"
                           />
                           
-                          {/* Upload overlay */}
+                          {/* Upload overlay with progress */}
                           {image.isUploading && (
-                            <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center gap-2">
+                            <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2">
                               <Loader2 className="size-6 animate-spin text-white" />
                               <span className="text-xs text-white">Mengupload...</span>
                               <div className="w-3/4">
-                                <Progress value={image.uploadProgress} className="h-1" />
+                                <Progress 
+                                  value={image.uploadProgress} 
+                                  className="h-1.5 bg-white/30" 
+                                />
                               </div>
                             </div>
                           )}
                           
                           {/* Success indicator */}
                           {!image.isUploading && image.serverPath && (
-                            <div className="absolute top-1 left-1">
-                              <CheckCircle2 className="size-5 text-green-500 drop-shadow-md" />
+                            <div className="absolute top-2 left-2 bg-green-500 rounded-full p-0.5">
+                              <CheckCircle2 className="size-4 text-white" />
                             </div>
                           )}
                           
                           {/* Error state */}
                           {image.uploadError && !image.isUploading && (
-                            <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2 p-2">
+                            <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-2 p-2">
+                              <AlertCircle className="size-6 text-red-400" />
                               <span className="text-xs text-white text-center">{image.uploadError}</span>
                               <Button
                                 variant="secondary"
                                 size="sm"
                                 className="h-7 text-xs"
-                                onClick={() => retryUpload(index)}
+                                onClick={() => retryUpload(image.id)}
                               >
                                 Retry
                               </Button>
@@ -556,8 +512,8 @@ export function CreatePost({
                             type="button"
                             variant="secondary"
                             size="icon"
-                            className="absolute top-1 right-1 size-6 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={() => removeImage(index)}
+                            className="absolute top-2 right-2 size-6 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={() => removeImage(image.id)}
                           >
                             <X className="size-3" />
                           </Button>
@@ -566,22 +522,23 @@ export function CreatePost({
                     </div>
                     
                     {/* Upload status summary */}
-                    <div className="mt-2 text-xs text-muted-foreground flex items-center gap-2">
-                      {hasUploadingImages && (
-                        <span className="flex items-center gap-1">
+                    <div className="mt-2 text-xs text-muted-foreground flex items-center gap-3">
+                      {uploadingCount > 0 && (
+                        <span className="flex items-center gap-1 text-yellow-600">
                           <Loader2 className="size-3 animate-spin" />
-                          Mengupload gambar...
+                          {uploadingCount} sedang upload...
                         </span>
                       )}
-                      {allImagesUploaded && (
+                      {uploadedCount > 0 && !uploadingCount && (
                         <span className="flex items-center gap-1 text-green-600">
                           <CheckCircle2 className="size-3" />
-                          {images.length} gambar siap dipost
+                          {uploadedCount} gambar siap
                         </span>
                       )}
-                      {hasFailedImages && !hasUploadingImages && (
-                        <span className="text-destructive">
-                          Beberapa gambar gagal diupload
+                      {failedCount > 0 && !uploadingCount && (
+                        <span className="flex items-center gap-1 text-red-500">
+                          <AlertCircle className="size-3" />
+                          {failedCount} gagal
                         </span>
                       )}
                     </div>
@@ -665,7 +622,7 @@ export function CreatePost({
                 </div>
                 <Button
                   onClick={handleSubmit}
-                  disabled={isSubmitting || (!content.trim() && images.length === 0) || hasUploadingImages}
+                  disabled={isSubmitting || !canPost}
                   className="gap-2"
                   size="sm"
                 >
