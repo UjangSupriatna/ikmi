@@ -1,0 +1,343 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id                       String                    @id @default(cuid())
+  email                    String                    @unique
+  password                 String
+  name                     String
+  username                 String                    @unique
+  avatar                   String?
+  coverPhoto               String?
+  bio                      String?
+  phone                    String?
+  address                  String?
+  website                  String?
+  headline                 String?
+  skills                   String?
+  birthday                 DateTime?
+  gender                   String?
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  achievements             Achievement[]
+  comments                 Comment[]
+  conversationParticipants ConversationParticipant[]
+  educations               Education[]
+  eventAttendances         EventAttendance[]
+  events                   Event[]
+  experiences              Experience[]
+  friendRequests           Friendship[]              @relation("FriendRequests")
+  friendships              Friendship[]              @relation("UserFriends")
+  groupJoinRequests        GroupJoinRequest[]
+  groups                   GroupMember[]
+  groupCreator             Group[]                   @relation("GroupCreator")
+  likes                    Like[]
+  messages                 Message[]                 @relation("MessageSender")
+  notifications            Notification[]
+  portfolios               Portfolio[]
+  posts                    Post[]
+
+  @@map("users")
+}
+
+model Post {
+  id         String    @id @default(cuid())
+  content    String
+  images     String?
+  location   String?
+  visibility String    @default("public")
+  groupId    String?
+  authorId   String
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  comments   Comment[]
+  likes      Like[]
+  author     User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  group      Group?    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([authorId])
+  @@index([groupId])
+  @@map("posts")
+}
+
+model Comment {
+  id        String    @id @default(cuid())
+  content   String
+  images    String?
+  postId    String
+  authorId  String
+  parentId  String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parent    Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  replies   Comment[] @relation("CommentReplies")
+  post      Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  likes     Like[]
+
+  @@index([postId])
+  @@index([authorId])
+  @@index([parentId], map: "comments_parentId_fkey")
+  @@map("comments")
+}
+
+model Like {
+  id        String   @id @default(cuid())
+  userId    String
+  postId    String?
+  commentId String?
+  createdAt DateTime @default(now())
+  comment   Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  post      Post?    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@unique([userId, commentId])
+  @@index([commentId], map: "likes_commentId_fkey")
+  @@index([postId], map: "likes_postId_fkey")
+  @@map("likes")
+}
+
+model Friendship {
+  id        String   @id @default(cuid())
+  userId    String
+  friendId  String
+  status    String   @default("pending")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  friend    User     @relation("FriendRequests", fields: [friendId], references: [id], onDelete: Cascade)
+  user      User     @relation("UserFriends", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, friendId])
+  @@index([friendId], map: "friendships_friendId_fkey")
+  @@map("friendships")
+}
+
+model Group {
+  id           String             @id @default(cuid())
+  name         String
+  description  String?
+  coverImage   String?
+  avatar       String?
+  privacy      String             @default("public")
+  createdById  String
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  joinRequests GroupJoinRequest[]
+  members      GroupMember[]
+  createdBy    User               @relation("GroupCreator", fields: [createdById], references: [id])
+  posts        Post[]
+
+  @@index([createdById], map: "groups_createdById_fkey")
+  @@map("groups")
+}
+
+model GroupMember {
+  id       String   @id @default(cuid())
+  userId   String
+  groupId  String
+  role     String   @default("member")
+  joinedAt DateTime @default(now())
+  group    Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, groupId])
+  @@index([groupId], map: "group_members_groupId_fkey")
+  @@map("group_members")
+}
+
+model GroupJoinRequest {
+  id        String   @id @default(cuid())
+  userId    String
+  groupId   String
+  status    String   @default("pending")
+  message   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, groupId])
+  @@index([groupId], map: "group_join_requests_groupId_fkey")
+  @@map("group_join_requests")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  message   String
+  data      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("notifications")
+}
+
+model Education {
+  id          String    @id @default(cuid())
+  userId      String
+  institution String
+  degree      String
+  field       String?
+  startDate   DateTime
+  endDate     DateTime?
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("educations")
+}
+
+model Experience {
+  id          String    @id @default(cuid())
+  userId      String
+  company     String
+  position    String
+  location    String?
+  startDate   DateTime
+  endDate     DateTime?
+  current     Boolean   @default(false)
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("experiences")
+}
+
+model Achievement {
+  id          String    @id @default(cuid())
+  userId      String
+  title       String
+  description String?
+  date        DateTime?
+  issuer      String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("achievements")
+}
+
+model Portfolio {
+  id           String   @id @default(cuid())
+  userId       String
+  title        String
+  description  String?
+  link         String?
+  images       String?
+  technologies String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("portfolios")
+}
+
+model Conversation {
+  id           String                    @id @default(cuid())
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+  participants ConversationParticipant[]
+  messages     Message[]
+
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  id             String       @id @default(cuid())
+  conversationId String
+  userId         String
+  joinedAt       DateTime     @default(now())
+  lastReadAt     DateTime?
+  clearedAt      DateTime?
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, conversationId])
+  @@index([conversationId])
+  @@index([userId])
+  @@map("conversation_participants")
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  senderId       String
+  content        String
+  images         String?
+  read           Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([senderId])
+  @@map("messages")
+}
+
+model Api {
+  id      Int    @id @default(1)
+  baseurl String
+  key_api String
+
+  @@map("api")
+}
+
+model Event {
+  id           String            @id @default(cuid())
+  title        String
+  description  String?
+  image        String?
+  startDate    DateTime
+  endDate      DateTime?
+  location     String?
+  locationType String            @default("offline")
+  onlineUrl    String?
+  category     String            @default("seminar")
+  maxAttendees Int?
+  isFree       Boolean           @default(true)
+  price        String?
+  status       String            @default("upcoming")
+  createdById  String
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  attendances  EventAttendance[]
+  createdBy    User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([createdById])
+  @@index([startDate])
+  @@index([category])
+  @@map("events")
+}
+
+model EventAttendance {
+  id        String   @id @default(cuid())
+  eventId   String
+  userId    String
+  status    String   @default("interested")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventId])
+  @@index([eventId])
+  @@index([userId])
+  @@map("event_attendances")
+}
